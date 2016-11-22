@@ -31,6 +31,9 @@ type Scope interface {
 	// Gauge returns the Gauge object corresponding to the name
 	Gauge(name string) Gauge
 
+	// Histogram returns the Histogram object corresponding to the name
+	Histogram(name string) Histogram
+
 	// Timer returns the Timer object corresponding to the name
 	Timer(name string) Timer
 
@@ -44,15 +47,39 @@ type Scope interface {
 	Capabilities() Capabilities
 }
 
-// TestScope is a metrics collector that has no reporting, ensuring that
-// all emitted values have a given prefix or set of tags
-type TestScope interface {
-	Scope
-
-	// Snapshot returns a copy of all values since the last report execution,
-	// this is an expensive operation and should only be use for testing purposes
-	Snapshot() Snapshot
+// Counter is the interface for emitting counter type metrics
+type Counter interface {
+	// Inc increments the counter by a delta
+	Inc(delta int64)
 }
+
+// Gauge is the interface for emitting gauge metrics
+type Gauge interface {
+	// Update sets the gauges absolute value
+	Update(value float64)
+}
+
+// Histogram is the interface for emitting histogram metrics
+type Histogram interface {
+	// Record a value for a histogram
+	Record(value float64)
+}
+
+// Timer is the interface for logging statsd-timer-type metrics
+type Timer interface {
+	// Record a specific duration directly
+	Record(time.Duration)
+
+	// Start gives you back a specific point in time to report via Stop()
+	Start() StopwatchStart
+
+	// Stop records the difference between the current clock and startTime
+	Stop(startTime StopwatchStart)
+}
+
+// StopwatchStart is returned by a timer's start method, and should be passed
+// back to the timer's stop method at the end of the interval
+type StopwatchStart time.Time
 
 // Capabilities is a description of metrics reporting capabilities
 type Capabilities interface {
@@ -61,98 +88,4 @@ type Capabilities interface {
 
 	// Tagging returns whether the reporter has the capability for tagged metrics
 	Tagging() bool
-}
-
-// Snapshot is a snapshot of values since last report execution
-type Snapshot interface {
-	// Counters returns a snapshot of all counters since last report execution
-	Counters() map[string]CounterSnapshot
-
-	// Gauges returns a snapshot of all counters since last report execution
-	Gauges() map[string]GaugeSnapshot
-
-	// Timers returns a snapshot of all counters since last report execution
-	Timers() map[string]TimerSnapshot
-}
-
-// CounterSnapshot is a snapshot of a counter
-type CounterSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Value returns the value
-	Value() int64
-}
-
-// GaugeSnapshot is a snapshot of a counter
-type GaugeSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Value returns the value
-	Value() float64
-}
-
-// TimerSnapshot is a snapshot of a counter
-type TimerSnapshot interface {
-	// Name returns the name
-	Name() string
-
-	// Tags returns the tags
-	Tags() map[string]string
-
-	// Values returns the values
-	Values() []time.Duration
-}
-
-// StatsReporter is a backend for Scopes to report metrics to
-type StatsReporter interface {
-	// ReportCounter reports a counter value
-	ReportCounter(name string, tags map[string]string, value int64)
-
-	// ReportGauge reports a gauge value
-	ReportGauge(name string, tags map[string]string, value float64)
-
-	// ReportTimer reports a timer value
-	ReportTimer(name string, tags map[string]string, interval time.Duration)
-
-	// Capabilities returns a description of metrics reporting capabilities
-	Capabilities() Capabilities
-
-	// Flush is expected to be called by a Scope when it completes a round or reporting
-	Flush()
-}
-
-// Counter is the interface for logging statsd-counter-type metrics
-type Counter interface {
-	// Inc increments the counter by a delta
-	Inc(delta int64)
-}
-
-// Gauge is the interface for logging statsd-gauge-type metrics
-type Gauge interface {
-	// Update sets the gauges absolute value
-	Update(value float64)
-}
-
-// StopwatchStart is returned by a timer's start method, and should be passed
-// back to the timer's stop method at the end of the interval
-type StopwatchStart time.Time
-
-// Timer is the interface for logging statsd-timer-type metrics
-type Timer interface {
-	// Record Record a specific duration directly
-	Record(time.Duration)
-
-	// Start gives you back a specific point in time to report via Stop()
-	Start() StopwatchStart
-
-	// Stop records the difference between the current clock and startTime
-	Stop(startTime StopwatchStart)
 }
