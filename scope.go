@@ -25,6 +25,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 var (
@@ -76,6 +78,9 @@ type scope struct {
 	gauges     map[string]*gauge
 	timers     map[string]*timer
 	histograms map[string]*histogram
+
+	sem *semaphore.Weighted
+	wg  *sync.WaitGroup
 }
 
 type scopeStatus struct {
@@ -165,6 +170,9 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		gauges:     make(map[string]*gauge),
 		timers:     make(map[string]*timer),
 		histograms: make(map[string]*histogram),
+
+		sem: semaphore.NewWeighted(1 << 4),
+		wg:  &sync.WaitGroup{},
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -205,6 +213,33 @@ func (s *scope) report(r StatsReporter) {
 }
 
 func (s *scope) cachedReport() {
+	/*
+		done := make(chan struct{})
+		go func() {
+			wg := &sync.WaitGroup{}
+			s.cm.RLock()
+
+			for _, counter := range s.counters {
+				counter := counter
+				if s.sem.TryAcquire(1) {
+					wg.Add(1)
+					go func() {
+						counter.cachedReport()
+						wg.Done()
+						s.sem.Release(1)
+					}()
+				} else {
+					counter.cachedReport()
+				}
+			}
+
+			wg.Wait()
+			s.cm.RUnlock()
+			close(done)
+		}()
+		<-done
+	*/
+
 	s.cm.RLock()
 	for _, counter := range s.counters {
 		counter.cachedReport()
@@ -265,9 +300,20 @@ func (s *scope) reportRegistryWithLock() {
 		s.reporter.Flush()
 	} else if s.cachedReporter != nil {
 		for _, ss := range s.registry.subscopes {
-			ss.cachedReport()
+			ss := ss
+
+			if s.sem.TryAcquire(1) {
+				s.wg.Add(1)
+				go func() {
+					ss.cachedReport()
+					s.wg.Done()
+					s.sem.Release(1)
+				}()
+			} else {
+				ss.cachedReport()
+			}
 		}
-		s.cachedReporter.Flush()
+		s.wg.Wait()
 	}
 	s.registry.RUnlock()
 }
@@ -420,6 +466,7 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 		gauges:     make(map[string]*gauge),
 		timers:     make(map[string]*timer),
 		histograms: make(map[string]*histogram),
+		sem:        semaphore.NewWeighted(1 << 1),
 	}
 
 	s.registry.subscopes[key] = subscope
