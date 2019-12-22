@@ -13,6 +13,8 @@ import (
 )
 
 func TestScopeCachedFlushTimes(t *testing.T) {
+	t.Skip("skipping long-running flush test")
+
 	reporter, err := m3.NewReporter(m3.Options{
 		HostPorts:          []string{"127.0.0.1:9052"},
 		Service:            "test",

@@ -91,10 +91,11 @@ func newTestHistogramValue() *testHistogramValue {
 }
 
 type testStatsReporter struct {
-	cg sync.WaitGroup
-	gg sync.WaitGroup
-	tg sync.WaitGroup
-	hg sync.WaitGroup
+	mtx sync.Mutex
+	cg  sync.WaitGroup
+	gg  sync.WaitGroup
+	tg  sync.WaitGroup
+	hg  sync.WaitGroup
 
 	scope Scope
 
@@ -126,6 +127,9 @@ func (r *testStatsReporter) WaitAll() {
 func (r *testStatsReporter) AllocateCounter(
 	name string, tags map[string]string,
 ) CachedCount {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	counter := &testIntValue{
 		val:      0,
 		tags:     tags,
@@ -136,6 +140,9 @@ func (r *testStatsReporter) AllocateCounter(
 }
 
 func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, value int64) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	r.counters[name] = &testIntValue{
 		val:  value,
 		tags: tags,
@@ -146,6 +153,9 @@ func (r *testStatsReporter) ReportCounter(name string, tags map[string]string, v
 func (r *testStatsReporter) AllocateGauge(
 	name string, tags map[string]string,
 ) CachedGauge {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	gauge := &testFloatValue{
 		val:      0,
 		tags:     tags,
@@ -156,6 +166,9 @@ func (r *testStatsReporter) AllocateGauge(
 }
 
 func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, value float64) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	r.gauges[name] = &testFloatValue{
 		val:  value,
 		tags: tags,
@@ -166,6 +179,9 @@ func (r *testStatsReporter) ReportGauge(name string, tags map[string]string, val
 func (r *testStatsReporter) AllocateTimer(
 	name string, tags map[string]string,
 ) CachedTimer {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	timer := &testIntValue{
 		val:      0,
 		tags:     tags,
@@ -176,6 +192,9 @@ func (r *testStatsReporter) AllocateTimer(
 }
 
 func (r *testStatsReporter) ReportTimer(name string, tags map[string]string, interval time.Duration) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	r.timers[name] = &testIntValue{
 		val:  int64(interval),
 		tags: tags,
@@ -240,6 +259,9 @@ func (r *testStatsReporter) ReportHistogramValueSamples(
 	bucketUpperBound float64,
 	samples int64,
 ) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	value, ok := r.histograms[name]
 	if !ok {
 		value = newTestHistogramValue()
@@ -258,6 +280,9 @@ func (r *testStatsReporter) ReportHistogramDurationSamples(
 	bucketUpperBound time.Duration,
 	samples int64,
 ) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
 	value, ok := r.histograms[name]
 	if !ok {
 		value = newTestHistogramValue()
@@ -273,7 +298,10 @@ func (r *testStatsReporter) Capabilities() Capabilities {
 }
 
 func (r *testStatsReporter) Flush() {
-	atomic.AddInt32(&r.flushes, 1)
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
+	r.flushes++
 }
 
 func TestWriteTimerImmediately(t *testing.T) {
@@ -347,8 +375,12 @@ func testReportLoopFlushOnce(t *testing.T, r *testStatsReporter, s Scope) {
 		RecordValue(42.42)
 	r.WaitAll()
 
-	v := atomic.LoadInt32(&r.flushes)
-	assert.Equal(t, int32(1), v)
+	time.Sleep(100 * time.Millisecond)
+
+	r.mtx.Lock()
+	v := r.flushes
+	r.mtx.Unlock()
+	assert.True(t, v >= 1)
 }
 
 func TestCachedReporterFlushOnce(t *testing.T) {

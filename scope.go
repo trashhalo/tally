@@ -23,6 +23,7 @@ package tally
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"sync"
 	"time"
 
@@ -79,8 +80,10 @@ type scope struct {
 	timers     map[string]*timer
 	histograms map[string]*histogram
 
-	sem *semaphore.Weighted
-	wg  *sync.WaitGroup
+	sem  *semaphore.Weighted
+	wg   *sync.WaitGroup
+	root bool
+	key  string
 }
 
 type scopeStatus struct {
@@ -171,8 +174,10 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		timers:     make(map[string]*timer),
 		histograms: make(map[string]*histogram),
 
-		sem: semaphore.NewWeighted(1 << 4),
-		wg:  &sync.WaitGroup{},
+		// sem: semaphore.NewWeighted(1 << 4),
+		sem:  semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1))),
+		wg:   &sync.WaitGroup{},
+		root: true,
 	}
 
 	// NB(r): Take a copy of the tags on creation
@@ -314,6 +319,7 @@ func (s *scope) reportRegistryWithLock() {
 			}
 		}
 		s.wg.Wait()
+		s.cachedReporter.Flush()
 	}
 	s.registry.RUnlock()
 }
@@ -466,7 +472,7 @@ func (s *scope) subscope(prefix string, immutableTags map[string]string) Scope {
 		gauges:     make(map[string]*gauge),
 		timers:     make(map[string]*timer),
 		histograms: make(map[string]*histogram),
-		sem:        semaphore.NewWeighted(1 << 1),
+		key:        key, // TODO: xxhash
 	}
 
 	s.registry.subscopes[key] = subscope
@@ -542,7 +548,43 @@ func (s *scope) Snapshot() Snapshot {
 	return snap
 }
 
+func (s *scope) closeSubscope() error {
+	s.registry.Lock()
+	delete(s.registry.subscopes, s.key)
+	s.registry.Unlock()
+
+	s.cm.Lock()
+	for key := range s.counters {
+		delete(s.counters, key)
+	}
+	s.cm.Unlock()
+
+	s.gm.Lock()
+	for key := range s.gauges {
+		delete(s.gauges, key)
+	}
+	s.gm.Unlock()
+
+	s.tm.Lock()
+	for key := range s.timers {
+		delete(s.timers, key)
+	}
+	s.tm.Unlock()
+
+	s.hm.Lock()
+	for key := range s.histograms {
+		delete(s.histograms, key)
+	}
+	s.hm.Unlock()
+
+	return nil
+}
+
 func (s *scope) Close() error {
+	if !s.root {
+		return s.closeSubscope()
+	}
+
 	s.status.Lock()
 
 	// don't wait to close more than once (panic on double close of
