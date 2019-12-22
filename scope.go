@@ -174,8 +174,7 @@ func newRootScope(opts ScopeOptions, interval time.Duration) *scope {
 		timers:     make(map[string]*timer),
 		histograms: make(map[string]*histogram),
 
-		// sem: semaphore.NewWeighted(1 << 4),
-		sem:  semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1))),
+		sem:  semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0) << 2)),
 		wg:   &sync.WaitGroup{},
 		root: true,
 	}
