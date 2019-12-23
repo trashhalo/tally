@@ -21,6 +21,7 @@
 package tally
 
 import (
+	"io"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -880,4 +882,29 @@ func TestScopeFlushOnClose(t *testing.T) {
 	assert.EqualValues(t, 1, r.counters["foo"].val)
 
 	assert.NoError(t, closer.Close())
+}
+
+func TestSubscopeClose(t *testing.T) {
+	r := newTestStatsReporter()
+	root, closer := NewRootScope(ScopeOptions{Reporter: r}, time.Hour)
+	defer closer.Close()
+
+	s := root.(*scope)
+	ss := root.SubScope("subscope")
+
+	require.Equal(t, 2, len(s.registry.subscopes))
+
+	err := ss.(io.Closer).Close()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(s.registry.subscopes))
+}
+
+func TestNameGeneration(t *testing.T) {
+	root, _ := NewRootScope(ScopeOptions{
+		Prefix:   "hello",
+		Reporter: NullStatsReporter,
+	}, 0)
+	scope := root.(*scope)
+
+	require.Equal(t, "hello.world", scope.fullyQualifiedName("world"))
 }

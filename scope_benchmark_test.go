@@ -32,6 +32,10 @@ func BenchmarkNameGeneration(b *testing.B) {
 		Reporter: NullStatsReporter,
 	}, 0)
 	s := root.(*scope)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
 	for n := 0; n < b.N; n++ {
 		s.fullyQualifiedName("take.me.to")
 	}
@@ -44,10 +48,12 @@ func BenchmarkCounterAllocation(b *testing.B) {
 	}, 0)
 	s := root.(*scope)
 
-	ids := make([]string, 0, b.N)
-	for i := 0; i < b.N; i++ {
-		ids = append(ids, fmt.Sprintf("take.me.to.%d", i))
+	ids := make([]string, 1e7)
+	for i := 0; i < len(ids); i++ {
+		ids[i] = "take.me.to." + strconv.Itoa(i)
 	}
+
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
@@ -67,6 +73,8 @@ func BenchmarkSanitizedCounterAllocation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ids = append(ids, fmt.Sprintf("take.me.to.%d", i))
 	}
+
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
@@ -85,6 +93,10 @@ func BenchmarkNameGenerationTagged(b *testing.B) {
 		Reporter: NullStatsReporter,
 	}, 0)
 	s := root.(*scope)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
 	for n := 0; n < b.N; n++ {
 		s.fullyQualifiedName("take.me.to")
 	}
@@ -95,6 +107,10 @@ func BenchmarkNameGenerationNoPrefix(b *testing.B) {
 		Reporter: NullStatsReporter,
 	}, 0)
 	s := root.(*scope)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
 	for n := 0; n < b.N; n++ {
 		s.fullyQualifiedName("im.all.alone")
 	}
@@ -119,5 +135,18 @@ func BenchmarkHistogramExisting(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		root.Histogram("foo", DefaultBuckets)
+	}
+}
+
+func BenchmarkSubscope(b *testing.B) {
+	root, _ := NewRootScope(ScopeOptions{
+		Reporter: NullStatsReporter,
+	}, 0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		root.SubScope(strconv.Itoa(i))
 	}
 }
