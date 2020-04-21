@@ -18,12 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+//nolint:errcheck,lll
 package thriftudp
 
 import (
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -31,7 +33,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
+var (
+	localListenAddr = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)}
+	listenConfig    = net.ListenConfig{}
+)
 
 func TestNewTUDPClientTransport(t *testing.T) {
 	_, err := NewTUDPClientTransport("fakeAddressAndPort", "")
@@ -60,16 +65,16 @@ func TestNewTUDPClientTransport(t *testing.T) {
 }
 
 func TestNewTUDPServerTransport(t *testing.T) {
-	_, err := NewTUDPServerTransport("fakeAddressAndPort")
+	_, err := NewTUDPServerTransport("fakeAddressAndPort", listenConfig)
 	require.NotNil(t, err)
 
-	trans, err := NewTUDPServerTransport(localListenAddr.String())
+	trans, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	require.True(t, trans.IsOpen())
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
 
 	//Ensure a second server can't be created on the same address
-	trans2, err := NewTUDPServerTransport(trans.Addr().String())
+	trans2, err := NewTUDPServerTransport(trans.Addr().String(), listenConfig)
 	if trans2 != nil {
 		//close the second server if one got created
 		trans2.Close()
@@ -79,13 +84,31 @@ func TestNewTUDPServerTransport(t *testing.T) {
 	err = trans.Close()
 	require.Nil(t, err)
 	require.False(t, trans.IsOpen())
+
+	//test if net.ListenConfig is used
+	var ch = make(chan struct{})
+	_, _ = NewTUDPServerTransport(
+		localListenAddr.String(),
+		net.ListenConfig{
+			Control: func(_, _ string, _ syscall.RawConn) error {
+				close(ch)
+				return nil
+			},
+		},
+	)
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected control function to execute")
+	}
 }
 
 func TestTUDPServerTransportIsOpen(t *testing.T) {
-	_, err := NewTUDPServerTransport("fakeAddressAndPort")
+	_, err := NewTUDPServerTransport("fakeAddressAndPort", listenConfig)
 	require.NotNil(t, err)
 
-	trans, err := NewTUDPServerTransport(localListenAddr.String())
+	trans, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	require.True(t, trans.IsOpen())
 	require.Equal(t, ^uint64(0), trans.RemainingBytes())
@@ -112,7 +135,7 @@ func TestTUDPServerTransportIsOpen(t *testing.T) {
 }
 
 func TestWriteRead(t *testing.T) {
-	server, err := NewTUDPServerTransport(localListenAddr.String())
+	server, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	defer server.Close()
 
@@ -138,12 +161,13 @@ func TestWriteRead(t *testing.T) {
 }
 
 func TestWriteByteReadByte(t *testing.T) {
-	server, err := NewTUDPServerTransport(localListenAddr.String())
+	server, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	defer server.Close()
 
 	client, err := NewTUDPClientTransport(server.Addr().String(), "")
 	require.Nil(t, err)
+	client.Open()
 	defer client.Close()
 
 	for _, b := range []byte("test") {
@@ -163,7 +187,7 @@ func TestWriteByteReadByte(t *testing.T) {
 }
 
 func TestReadByteEmptyPacket(t *testing.T) {
-	server, err := NewTUDPServerTransport(localListenAddr.String())
+	server, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	defer server.Close()
 
@@ -179,7 +203,7 @@ func TestReadByteEmptyPacket(t *testing.T) {
 }
 
 func TestIndirectCloseError(t *testing.T) {
-	trans, err := NewTUDPServerTransport(localListenAddr.String())
+	trans, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	require.True(t, trans.IsOpen())
 
@@ -196,7 +220,7 @@ func TestIndirectCloseError(t *testing.T) {
 // Note: this test is here merely to capture the existing functionality.
 // It's questionable whether multiple calls to Close() should succeed or not.
 func TestDoubleCloseIsOK(t *testing.T) {
-	trans, err := NewTUDPServerTransport(localListenAddr.String())
+	trans, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	require.True(t, trans.IsOpen())
 
@@ -210,7 +234,7 @@ func TestDoubleCloseIsOK(t *testing.T) {
 }
 
 func TestConnClosedReadWrite(t *testing.T) {
-	trans, err := NewTUDPServerTransport(localListenAddr.String())
+	trans, err := NewTUDPServerTransport(localListenAddr.String(), listenConfig)
 	require.Nil(t, err)
 	require.True(t, trans.IsOpen())
 	trans.Close()
@@ -279,7 +303,7 @@ func TestFlushErrors(t *testing.T) {
 		trans.conn.Close()
 
 		trans.Write([]byte{1, 2, 3, 4})
-		err = trans.Flush()
+		_ = trans.Flush()
 		require.Error(t, trans.Flush(), "Flush with data should fail")
 	})
 }
